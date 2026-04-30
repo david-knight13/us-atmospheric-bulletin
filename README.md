@@ -12,18 +12,18 @@ scientific bulletin. Two views:
 
 ## Data
 
-- **Source:** ECMWF [ERA5](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5)
-  reanalysis, accessed through the [Open-Meteo](https://open-meteo.com/) free
-  archive API (no key required).
-- **Period:** 2014-01-01 through 2023-12-31 (10 years of daily values).
-- **Stations:** ~140 representative cities across all 50 states + DC. Daily
-  normals are computed per calendar day after collapsing Feb 29 into Feb 28.
+- **Source:** NASA's [MERRA-2](https://gmao.gsfc.nasa.gov/reanalysis/MERRA-2/)
+  reanalysis, accessed via the [NASA POWER](https://power.larc.nasa.gov/) free
+  daily endpoint (no key required, no daily quota).
+- **Period:** 1981-01-01 through 2023-12-31 — **43 years**, *n=43* per
+  day-of-year. Comfortably above the WMO's 30-year normal threshold.
+- **Stations:** **399** representative cities covering all 50 states + DC,
+  with deliberate fill-in across the Mountain West, Great Plains, Alaska, and
+  Hawaii. Daily normals are computed per calendar day after collapsing Feb 29
+  into Feb 28.
 - **Variables:** daily high / low / mean temperature (°F), precipitation (in),
-  daily max wind speed (mph). Each is stored as a 365-element `mean[]` and
-  `std[]` array per station.
-
-The published `data/climatology.json` may contain a subset of cities depending
-on what the throttled free-tier fetcher was able to retrieve.
+  daily max wind speed at 10 m (mph). Each is stored as a 365-element `mean[]`
+  and `std[]` array per station. Population standard deviation, not sample.
 
 ## Local development
 
@@ -34,9 +34,8 @@ python -m http.server 8765           # then open http://127.0.0.1:8765
 ```
 
 The fetcher is **resumable** — re-running it fills in any cities that failed
-during a previous attempt. Open-Meteo's free tier is rate-limited per minute
-and per hour; the script paces requests at ~6 s/req with up-to-30-minute
-backoffs on `HTTP 429`.
+during a previous attempt. NASA POWER permits modest concurrency without a
+daily quota, so the run completes in ~3 minutes for 399 stations × 43 years.
 
 ## Deployment
 

@@ -711,7 +711,7 @@ function buildSnapshotCard(c) {
         <span class="dc-kicker">SNAPSHOT</span>
         <span class="dc-title">${formatMonthDay(state.lookupDoy)} — Climatological Day</span>
       </div>
-      <div class="dc-meta">DOY ${String(state.lookupDoy + 1).padStart(3, "0")} · n=10 yr</div>
+      <div class="dc-meta">DOY ${String(state.lookupDoy + 1).padStart(3, "0")} · n=43 yr</div>
     </header>
     <div class="snapshot-station">
       <div>
@@ -805,7 +805,7 @@ function buildStatsCard(c) {
       </div>
     </div>
     <div class="stats-band">
-      Population standard deviation taken over the 10-year sample (n=10) for each calendar day, after merging Feb 29 into Feb 28. The annual mean is the arithmetic mean of all 365 daily normals.
+      Population standard deviation taken over the 43-year sample (n=43) for each calendar day, after merging Feb 29 into Feb 28. The annual mean is the arithmetic mean of all 365 daily normals.
     </div>`;
   return card;
 }
