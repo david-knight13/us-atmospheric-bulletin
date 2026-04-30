@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>U.S. Atmospheric Bulletin — Daily Climatology Reports</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Archivo+Black&family=Special+Elite&family=Newsreader:ital,wght@1,400;1,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <svg class="reg reg-tl" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 12 H10 M14 12 H24 M12 0 V10 M12 14 V24" stroke="currentColor" stroke-width="1" fill="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+  <svg class="reg reg-tr" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 12 H10 M14 12 H24 M12 0 V10 M12 14 V24" stroke="currentColor" stroke-width="1" fill="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+  <svg class="reg reg-bl" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 12 H10 M14 12 H24 M12 0 V10 M12 14 V24" stroke="currentColor" stroke-width="1" fill="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+  <svg class="reg reg-br" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 12 H10 M14 12 H24 M12 0 V10 M12 14 V24" stroke="currentColor" stroke-width="1" fill="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+
+  <header class="masthead">
+    <div class="masthead-l">
+      <div class="masthead-edition">VOL. <span>I</span> · NO. <span>0001</span> · CONTINENTAL EDITION</div>
+      <h1 class="masthead-title">U.S.&nbsp;ATMOSPHERIC&nbsp;<em>Bulletin</em></h1>
+      <div class="masthead-sub">A DECENNIAL CLIMATOLOGY · ECMWF / ERA5 REANALYSIS · DAILY NORMALS, 2014–2023</div>
+    </div>
+    <div class="masthead-r">
+      <div class="stamp">
+        <div class="stamp-row stamp-row--top">CIRCULATED</div>
+        <div class="stamp-row stamp-row--mid" id="datestamp">— — —</div>
+        <div class="stamp-row stamp-row--bot">UNCLASSIFIED ¶ FOR PUBLIC RELEASE</div>
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabbar" role="tablist">
+    <button data-view="map" class="tab is-active" role="tab" aria-selected="true">
+      <span class="tab-glyph">▣</span><span class="tab-num">§01</span><span class="tab-label">Spatial Distribution</span>
+    </button>
+    <button data-view="lookup" class="tab" role="tab" aria-selected="false">
+      <span class="tab-glyph">⌖</span><span class="tab-num">§02</span><span class="tab-label">Station Lookup</span>
+    </button>
+    <div class="tabbar-meta">
+      <span>FILE&nbsp;WX-CLIM-NORMAL</span>
+      <span class="tabbar-bullet">●</span>
+      <span>365-DAY CYCLE</span>
+      <span class="tabbar-bullet">●</span>
+      <span id="cityCount">— stations</span>
+    </div>
+  </nav>
+
+  <main>
+    <!-- ========== VIEW 01: HEATMAP ========== -->
+    <section id="view-map" class="view view--map" role="tabpanel">
+      <aside class="panel panel--controls">
+        <header class="panel-header">
+          <span class="panel-num">01</span>
+          <h2>Control Deck</h2>
+          <span class="panel-rule"></span>
+        </header>
+
+        <fieldset class="control control--vars">
+          <legend><span>A</span>&nbsp;Field Variable</legend>
+          <div class="varlist" id="varList"></div>
+        </fieldset>
+
+        <fieldset class="control control--slider">
+          <legend><span>B</span>&nbsp;Observation Date</legend>
+          <div class="slider-readout">
+            <span class="slider-readout-num" id="dateLabel">— —</span>
+            <span class="slider-readout-doy" id="doyLabel">DOY —</span>
+          </div>
+          <div class="slider-wrap">
+            <input type="range" id="daySlider" min="0" max="364" value="119" />
+            <svg class="slider-axis" id="sliderAxis" aria-hidden="true"></svg>
+          </div>
+        </fieldset>
+
+        <fieldset class="control control--sigma">
+          <legend><span>C</span>&nbsp;Statistical Overlay</legend>
+          <label class="toggle">
+            <input type="checkbox" id="sigmaToggle" />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-text">Apply&nbsp;deviation&nbsp;μ&nbsp;±&nbsp;n·σ</span>
+          </label>
+          <div class="sigma-row">
+            <div class="sigma-sign-group">
+              <button class="sigma-sign is-active" data-sign="-1" aria-label="minus">−</button>
+              <button class="sigma-sign" data-sign="1" aria-label="plus">+</button>
+            </div>
+            <div class="sigma-n">
+              <span>n =</span>
+              <input type="number" id="sigmaN" value="1" step="0.25" min="0" max="3" />
+              <span>σ</span>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="control control--legend">
+          <legend><span>D</span>&nbsp;Scale</legend>
+          <div class="legend-strip" id="legendStrip"></div>
+          <div class="legend-ticks" id="legendTicks"></div>
+        </fieldset>
+
+        <footer class="panel-footer">
+          <div>SOURCE&nbsp;·&nbsp;ECMWF ERA5 reanalysis</div>
+          <div>PROXY&nbsp;·&nbsp;open-meteo.com</div>
+          <div class="panel-footer-meta">no warranty · informational use only</div>
+        </footer>
+      </aside>
+
+      <div class="map-stage">
+        <div class="map-header">
+          <div class="map-header-l">
+            <span class="kicker">ISOPLETH</span>
+            <span class="title" id="mapTitle">— —</span>
+          </div>
+          <div class="map-header-r" id="mapMeta"></div>
+        </div>
+        <div class="map-canvas-wrap" id="mapCanvasWrap">
+          <canvas id="heatCanvas"></canvas>
+          <svg id="mapSvg"></svg>
+          <div class="hover-card" id="hoverCard" hidden></div>
+        </div>
+        <div class="map-footer">
+          <span class="map-footer-tag">FIG.&nbsp;01-A</span>
+          <span class="map-footer-text" id="mapCaption">Continental United States — interpolated via inverse-distance weighting (k=8, p=2) over 139 reference stations.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== VIEW 02: LOOKUP ========== -->
+    <section id="view-lookup" class="view view--lookup" role="tabpanel" hidden>
+      <div class="lookup-bar">
+        <div class="lookup-search">
+          <span class="lookup-prefix">QUERY&nbsp;▸</span>
+          <input id="searchInput" placeholder="enter city, state — e.g. &quot;Topeka, KS&quot;" autocomplete="off" />
+          <span class="lookup-suffix" id="searchSuffix"></span>
+          <ul class="lookup-results" id="searchResults" hidden></ul>
+        </div>
+      </div>
+
+      <div class="lookup-controls">
+        <div class="lookup-ctl">
+          <label class="ctl-label">A&nbsp;Range</label>
+          <div class="mode-toggle">
+            <button data-mode="day" class="mode is-active">DAY</button>
+            <button data-mode="month" class="mode">MONTH</button>
+          </div>
+        </div>
+        <div class="lookup-ctl">
+          <label class="ctl-label">B&nbsp;Date</label>
+          <input type="date" id="lookupDate" />
+        </div>
+        <div class="lookup-ctl">
+          <label class="ctl-label">C&nbsp;Variable</label>
+          <select id="lookupVar"></select>
+        </div>
+        <div class="lookup-ctl">
+          <label class="ctl-label">D&nbsp;Confidence</label>
+          <div class="sigma-row sigma-row--inline">
+            <div class="sigma-n">
+              <span>±</span>
+              <input type="number" id="lookupSigmaN" value="1" step="0.25" min="0" max="3" />
+              <span>σ</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lookup-dashboard" id="lookupDashboard">
+        <div class="dash-empty">
+          <span class="dash-empty-glyph">⌖</span>
+          <p>SELECT A STATION TO BEGIN.</p>
+          <p class="dash-empty-hint">Search by city or state above.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="bulletin-footer">
+    <div class="bf-row">
+      <span class="bf-cell">U.S. ATMOSPHERIC BULLETIN</span>
+      <span class="bf-cell">·</span>
+      <span class="bf-cell">CONTINENTAL EDITION</span>
+      <span class="bf-cell">·</span>
+      <span class="bf-cell" id="periodCell">PERIOD —</span>
+      <span class="bf-cell">·</span>
+      <span class="bf-cell">PAGE I / I</span>
+    </div>
+    <div class="bf-rule"></div>
+    <div class="bf-fine">
+      Climatological figures are <em>decennial daily normals</em> derived from ECMWF&nbsp;ERA5 reanalysis (2014–2023) sampled at <span id="footStations">— stations</span>. Standard deviations are population (σ, n=10). Spatial interpolation uses inverse-distance weighting and is for visualization only — do not infer micro-climate from this map.
+    </div>
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
