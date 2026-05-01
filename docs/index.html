@@ -32,17 +32,18 @@
 
   <nav class="tabbar" role="tablist">
     <button data-view="map" class="tab is-active" role="tab" aria-selected="true">
-      <span class="tab-glyph">▣</span><span class="tab-num">§01</span><span class="tab-label">Spatial Distribution</span>
+      <span class="tab-glyph">▣</span><span class="tab-num">§01</span><span class="tab-label">Map</span>
     </button>
     <button data-view="lookup" class="tab" role="tab" aria-selected="false">
       <span class="tab-glyph">⌖</span><span class="tab-num">§02</span><span class="tab-label">Station Lookup</span>
     </button>
+    <button data-view="compare" class="tab" role="tab" aria-selected="false">
+      <span class="tab-glyph">⇌</span><span class="tab-num">§03</span><span class="tab-label">Compare</span>
+    </button>
     <div class="tabbar-meta">
-      <span>FILE&nbsp;WX-CLIM-NORMAL</span>
-      <span class="tabbar-bullet">●</span>
-      <span>365-DAY CYCLE</span>
-      <span class="tabbar-bullet">●</span>
       <span id="cityCount">— stations</span>
+      <span class="tabbar-bullet">●</span>
+      <span>1981–2023</span>
     </div>
   </nav>
 
@@ -140,9 +141,10 @@
       <div class="lookup-controls">
         <div class="lookup-ctl">
           <label class="ctl-label">A&nbsp;Range</label>
-          <div class="mode-toggle">
-            <button data-mode="day" class="mode is-active">DAY</button>
-            <button data-mode="month" class="mode">MONTH</button>
+          <div class="mode-toggle" data-target="lookup">
+            <button data-mode="day" class="mode is-active">Day</button>
+            <button data-mode="month" class="mode">Month</button>
+            <button data-mode="year" class="mode">Year</button>
           </div>
         </div>
         <div class="lookup-ctl">
@@ -154,7 +156,7 @@
           <select id="lookupVar"></select>
         </div>
         <div class="lookup-ctl">
-          <label class="ctl-label">D&nbsp;Confidence</label>
+          <label class="ctl-label">D&nbsp;Confidence Band</label>
           <div class="sigma-row sigma-row--inline">
             <div class="sigma-n">
               <span>±</span>
@@ -168,8 +170,65 @@
       <div class="lookup-dashboard" id="lookupDashboard">
         <div class="dash-empty">
           <span class="dash-empty-glyph">⌖</span>
-          <p>SELECT A STATION TO BEGIN.</p>
-          <p class="dash-empty-hint">Search by city or state above.</p>
+          <p>Pick a station to begin.</p>
+          <p class="dash-empty-hint">Type a city or state in the search box — for example, <em>Denver, CO</em> or <em>Miami</em>. The dashboard below will populate with daily normals, statistical context, and (in <em>Month</em> or <em>Year</em> mode) a time-series chart with a confidence band.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== VIEW 03: COMPARE ========== -->
+    <section id="view-compare" class="view view--compare" role="tabpanel" hidden>
+      <div class="lookup-bar compare-bar">
+        <div class="compare-search-pair">
+          <div class="lookup-search compare-search" data-slot="A">
+            <span class="lookup-prefix">STATION&nbsp;A&nbsp;▸</span>
+            <input class="compare-input" data-slot="A" placeholder="search a city — e.g. &quot;Denver, CO&quot;" autocomplete="off" />
+            <span class="lookup-suffix" data-slot="A"></span>
+            <ul class="lookup-results" data-slot="A" hidden></ul>
+          </div>
+          <div class="lookup-search compare-search" data-slot="B">
+            <span class="lookup-prefix">STATION&nbsp;B&nbsp;▸</span>
+            <input class="compare-input" data-slot="B" placeholder="search a city — e.g. &quot;Phoenix, AZ&quot;" autocomplete="off" />
+            <span class="lookup-suffix" data-slot="B"></span>
+            <ul class="lookup-results" data-slot="B" hidden></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="lookup-controls">
+        <div class="lookup-ctl">
+          <label class="ctl-label">A&nbsp;Range</label>
+          <div class="mode-toggle" data-target="compare">
+            <button data-mode="day" class="mode is-active">Day</button>
+            <button data-mode="month" class="mode">Month</button>
+            <button data-mode="year" class="mode">Year</button>
+          </div>
+        </div>
+        <div class="lookup-ctl">
+          <label class="ctl-label">B&nbsp;Date</label>
+          <input type="date" id="compareDate" />
+        </div>
+        <div class="lookup-ctl">
+          <label class="ctl-label">C&nbsp;Variable</label>
+          <select id="compareVar"></select>
+        </div>
+        <div class="lookup-ctl">
+          <label class="ctl-label">D&nbsp;Confidence Band</label>
+          <div class="sigma-row sigma-row--inline">
+            <div class="sigma-n">
+              <span>±</span>
+              <input type="number" id="compareSigmaN" value="1" step="0.25" min="0" max="3" />
+              <span>σ</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lookup-dashboard" id="compareDashboard">
+        <div class="dash-empty">
+          <span class="dash-empty-glyph">⇌</span>
+          <p>Pick two stations to compare.</p>
+          <p class="dash-empty-hint">Useful for sanity-checking intuitions — for example, <em>Phoenix, AZ</em> versus <em>Death Valley, CA</em>, or <em>Seattle, WA</em> versus <em>San Diego, CA</em>. Snapshot, difference, and overlaid time-series will appear below.</p>
         </div>
       </div>
     </section>

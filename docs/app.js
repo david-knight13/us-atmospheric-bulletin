@@ -114,18 +114,28 @@ function colorFor(variable, value) {
 // ---------- app state ----------
 const state = {
   view: "map",
+
+  // map view
   variable: "tmax",
   doy: todayDoy(),
   sigmaOn: false,
   sigmaSign: -1,
   sigmaN: 1,
 
-  // lookup
+  // lookup view
   selectedCityId: null,
-  lookupMode: "day", // "day" | "month"
+  lookupMode: "day", // "day" | "month" | "year"
   lookupDoy: todayDoy(),
   lookupVariable: "tmax",
   lookupSigmaN: 1,
+
+  // compare view
+  compareAId: null,
+  compareBId: null,
+  compareMode: "month",
+  compareDoy: todayDoy(),
+  compareVariable: "tmax",
+  compareSigmaN: 1,
 };
 
 // ============================================================
@@ -147,6 +157,7 @@ document.getElementById("periodCell").textContent = `PERIOD ${META.period.replac
 // ============================================================
 const viewMap = document.getElementById("view-map");
 const viewLookup = document.getElementById("view-lookup");
+const viewCompare = document.getElementById("view-compare");
 document.querySelectorAll(".tabbar .tab").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tabbar .tab").forEach((b) => {
@@ -156,6 +167,7 @@ document.querySelectorAll(".tabbar .tab").forEach((btn) => {
     state.view = btn.dataset.view;
     viewMap.hidden = state.view !== "map";
     viewLookup.hidden = state.view !== "lookup";
+    viewCompare.hidden = state.view !== "compare";
     if (state.view === "map") {
       // ensure map sizes correctly when revealed
       requestAnimationFrame(resizeMap);
@@ -595,9 +607,12 @@ lookupVarSelect.addEventListener("change", () => {
   renderDashboard();
 });
 
-document.querySelectorAll(".mode-toggle .mode").forEach((btn) => {
+// Wire up the lookup-view mode toggle (DAY / MONTH / YEAR). Compare-view
+// toggle is wired separately below so the two stay independent.
+const lookupModeToggle = document.querySelector('.mode-toggle[data-target="lookup"]');
+lookupModeToggle.querySelectorAll(".mode").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".mode-toggle .mode")
+    lookupModeToggle.querySelectorAll(".mode")
       .forEach((b) => b.classList.toggle("is-active", b === btn));
     state.lookupMode = btn.dataset.mode;
     renderDashboard();
@@ -611,40 +626,52 @@ lookupSigmaN.addEventListener("input", () => {
   renderDashboard();
 });
 
-// ----- search -----
+// ----- generic station search helper -----
+// Wires an <input>, a results <ul>, and an optional suffix element together
+// so callers can plug it into multiple panels (lookup, compare A, compare B).
 function fuzzyMatch(q, c) {
-  const text = `${c.name} ${c.state}`.toLowerCase();
-  return text.includes(q);
+  return `${c.name} ${c.state}`.toLowerCase().includes(q);
 }
-function doSearch(q) {
-  q = q.toLowerCase().trim();
-  if (!q) { searchResults.hidden = true; searchResults.innerHTML = ""; searchSuffix.textContent = ""; return; }
-  const matches = CITIES.filter((c) => fuzzyMatch(q, c)).slice(0, 12);
-  searchResults.innerHTML = matches.map((c) =>
-    `<li data-id="${c.id}"><span>${c.name}</span><span class="li-state">${c.state}</span></li>`
-  ).join("");
-  searchResults.hidden = matches.length === 0;
-  searchSuffix.textContent = `${matches.length} hit${matches.length === 1 ? "" : "s"}`;
-  searchResults.querySelectorAll("li").forEach((li) => {
-    li.addEventListener("mousedown", (e) => e.preventDefault());
-    li.addEventListener("click", () => {
-      const c = CITIES.find((x) => x.id === li.dataset.id);
-      if (c) {
-        searchInput.value = `${c.name}, ${c.state}`;
-        searchResults.hidden = true;
-        selectStation(c);
-      }
+function bindSearch({ input, results, suffix, onPick }) {
+  function run() {
+    const q = input.value.toLowerCase().trim();
+    if (!q) {
+      results.hidden = true;
+      results.innerHTML = "";
+      if (suffix) suffix.textContent = "";
+      return;
+    }
+    const matches = CITIES.filter((c) => fuzzyMatch(q, c)).slice(0, 12);
+    results.innerHTML = matches.map((c) =>
+      `<li data-id="${c.id}"><span>${c.name}</span><span class="li-state">${c.state}</span></li>`
+    ).join("");
+    results.hidden = matches.length === 0;
+    if (suffix) suffix.textContent = matches.length
+      ? `${matches.length} match${matches.length === 1 ? "" : "es"}`
+      : "no matches";
+    results.querySelectorAll("li").forEach((li) => {
+      li.addEventListener("mousedown", (e) => e.preventDefault());
+      li.addEventListener("click", () => {
+        const c = CITIES.find((x) => x.id === li.dataset.id);
+        if (!c) return;
+        input.value = `${c.name}, ${c.state}`;
+        results.hidden = true;
+        onPick(c);
+      });
     });
+  }
+  input.addEventListener("input", run);
+  input.addEventListener("focus", run);
+  document.addEventListener("click", (e) => {
+    if (!results.contains(e.target) && e.target !== input) results.hidden = true;
   });
 }
-searchInput.addEventListener("input", () => doSearch(searchInput.value));
-searchInput.addEventListener("focus", () => {
-  if (searchInput.value) doSearch(searchInput.value);
-});
-document.addEventListener("click", (e) => {
-  if (!searchResults.contains(e.target) && e.target !== searchInput) {
-    searchResults.hidden = true;
-  }
+
+bindSearch({
+  input: searchInput,
+  results: searchResults,
+  suffix: searchSuffix,
+  onPick: (c) => selectStation(c),
 });
 
 function selectStation(c) {
@@ -664,16 +691,16 @@ function renderDashboard() {
     lookupDashboard.innerHTML = `
       <div class="dash-empty">
         <span class="dash-empty-glyph">⌖</span>
-        <p>SELECT A STATION TO BEGIN.</p>
-        <p class="dash-empty-hint">Search by city or state above.</p>
+        <p>Pick a station to begin.</p>
+        <p class="dash-empty-hint">Type a city or state in the search box — for example, <em>Denver, CO</em> or <em>Miami</em>. The dashboard will populate with daily normals, statistical context, and (in <em>Month</em> or <em>Year</em> mode) a time-series chart with a confidence band.</p>
       </div>`;
     return;
   }
   lookupDashboard.innerHTML = "";
   lookupDashboard.appendChild(buildSnapshotCard(c));
   lookupDashboard.appendChild(buildStatsCard(c));
-  if (state.lookupMode === "month") {
-    lookupDashboard.appendChild(buildTimeseriesCard(c));
+  if (state.lookupMode === "month" || state.lookupMode === "year") {
+    lookupDashboard.appendChild(buildTimeseriesCard(c, state.lookupMode));
   }
 }
 
@@ -810,173 +837,519 @@ function buildStatsCard(c) {
   return card;
 }
 
-function buildTimeseriesCard(c) {
+// =====================================================================
+// Generic time-series chart
+// =====================================================================
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+const SERIES_PALETTE = {
+  A: { color: "#1f1714", bandColor: "rgba(196,41,31,0.20)", bandColor2: "rgba(196,41,31,0.09)" },
+  B: { color: "#1d3557", bandColor: "rgba(29,53,87,0.20)",  bandColor2: "rgba(29,53,87,0.09)" },
+};
+
+function climSamples(city, variable, doyStart, count) {
+  const arr = city.climate[variable];
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const doy = (doyStart + i) % 365;
+    out.push({ x: i + 1, doy, mu: arr.mean[doy], sd: arr.std[doy] });
+  }
+  return out;
+}
+
+function dayTicks(days) {
+  const out = [];
+  if (days <= 14) {
+    for (let d = 1; d <= days; d++) out.push({ x: d, label: String(d) });
+  } else {
+    for (let d = 1; d <= days; d++) {
+      if (d === 1 || d === days || d % 5 === 0) out.push({ x: d, label: String(d) });
+    }
+  }
+  return out;
+}
+
+function monthTicks() {
+  // x = 1..365, ticks at the 1st of each month
+  return CUMULATIVE.map((c, i) => ({ x: c + 1, label: MONTH_SHORT[i] }));
+}
+
+function rangeForMode(mode, anchorDoy) {
+  if (mode === "year") {
+    return { start: 0, count: 365, ticks: monthTicks(), title: "Annual" };
+  }
+  // month
+  const { m: month } = monthDayFromDoy(anchorDoy);
+  return {
+    start: CUMULATIVE[month - 1],
+    count: DAYS_IN_MONTH[month - 1],
+    ticks: dayTicks(DAYS_IN_MONTH[month - 1]),
+    title: MONTH_LONG[month - 1],
+    monthIdx: month - 1,
+  };
+}
+
+function bandPath(samples, sx, sy, sigN, mult) {
+  if (!samples.length) return "";
+  let d = `M ${sx(samples[0].x)} ${sy(samples[0].mu + mult * sigN * samples[0].sd)}`;
+  for (let i = 1; i < samples.length; i++) {
+    const s = samples[i];
+    d += ` L ${sx(s.x)} ${sy(s.mu + mult * sigN * s.sd)}`;
+  }
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    d += ` L ${sx(s.x)} ${sy(s.mu - mult * sigN * s.sd)}`;
+  }
+  return d + " Z";
+}
+
+function meanPath(samples, sx, sy) {
+  if (!samples.length) return "";
+  let d = `M ${sx(samples[0].x)} ${sy(samples[0].mu)}`;
+  for (let i = 1; i < samples.length; i++) {
+    d += ` L ${sx(samples[i].x)} ${sy(samples[i].mu)}`;
+  }
+  return d;
+}
+
+function el(name, attrs = {}, children = []) {
+  const e = document.createElementNS(SVG_NS, name);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue;
+    e.setAttribute(k, v);
+  }
+  for (const c of children) e.appendChild(c);
+  return e;
+}
+
+// series: [{ name, samples, color, bandColor, bandColor2 }]
+// target: { x, mu, color } | null  — vertical marker at the selected day
+function renderTimeseriesSvg({ series, sigN, dec, unit, xRange, xTicks, target, height = 320 }) {
+  const W = 880, H = height, M = { l: 60, r: 24, t: 24, b: 36 };
+  const innerW = W - M.l - M.r;
+  const innerH = H - M.t - M.b;
+
+  // y range across all series, including the outer 2σ extents
+  const allVals = [];
+  for (const ser of series) {
+    for (const p of ser.samples) {
+      if (p.mu == null) continue;
+      allVals.push(p.mu - 2 * sigN * p.sd, p.mu + 2 * sigN * p.sd);
+    }
+  }
+  const yLo = allVals.length ? Math.min(...allVals) : 0;
+  const yHi = allVals.length ? Math.max(...allVals) : 1;
+  const yPad = (yHi - yLo) * 0.06 || 1;
+  const yMin = yLo - yPad, yMax = yHi + yPad;
+
+  const sx = (x) => M.l + ((x - xRange.min) / Math.max(1e-6, xRange.max - xRange.min)) * innerW;
+  const sy = (v) => M.t + (1 - (v - yMin) / Math.max(1e-6, yMax - yMin)) * innerH;
+
+  const svg = el("svg", {
+    "class": "timeseries-svg",
+    viewBox: `0 0 ${W} ${H}`,
+    preserveAspectRatio: "xMidYMid meet",
+  });
+
+  // Y gridlines + labels
+  const grid = el("g", { "class": "ts-grid" });
+  for (let i = 0; i <= 4; i++) {
+    const yv = yMin + (yMax - yMin) * (i / 4);
+    const y = sy(yv);
+    grid.appendChild(el("line", {
+      x1: M.l, x2: W - M.r, y1: y, y2: y,
+      stroke: "rgba(31,23,20,0.18)",
+    }));
+    const t = el("text", {
+      x: M.l - 6, y: y + 3, "text-anchor": "end",
+      "font-size": "10", fill: "rgba(31,23,20,0.55)",
+    });
+    t.textContent = yv.toFixed(dec);
+    grid.appendChild(t);
+  }
+  svg.appendChild(grid);
+
+  // Bands (sigma) — render from last to first so series A sits on top.
+  if (sigN > 0) {
+    for (let i = series.length - 1; i >= 0; i--) {
+      const s = series[i];
+      svg.appendChild(el("path", {
+        d: bandPath(s.samples, sx, sy, sigN, 2),
+        fill: s.bandColor2, stroke: "none",
+      }));
+      svg.appendChild(el("path", {
+        d: bandPath(s.samples, sx, sy, sigN, 1),
+        fill: s.bandColor, stroke: "none",
+      }));
+    }
+  }
+  // Mean lines (last to first so A sits on top)
+  for (let i = series.length - 1; i >= 0; i--) {
+    const s = series[i];
+    svg.appendChild(el("path", {
+      d: meanPath(s.samples, sx, sy),
+      fill: "none", stroke: s.color, "stroke-width": "1.7",
+    }));
+  }
+
+  // Target marker (vertical guide + dot + label)
+  if (target && target.mu != null && target.x >= xRange.min && target.x <= xRange.max) {
+    const tx = sx(target.x), ty = sy(target.mu);
+    svg.appendChild(el("line", {
+      x1: tx, x2: tx, y1: M.t, y2: M.t + innerH,
+      stroke: "rgba(196,41,31,0.55)", "stroke-dasharray": "2 3",
+    }));
+    svg.appendChild(el("circle", {
+      cx: tx, cy: ty, r: 4.5,
+      fill: target.color || "#c4291f",
+      stroke: "#1f1714", "stroke-width": "0.7",
+    }));
+    const lbl = el("text", {
+      x: tx + 8, y: ty - 8,
+      "class": "ts-target-text",
+      "font-size": "11", fill: "#1f1714",
+    });
+    lbl.textContent = `${target.mu.toFixed(dec)} ${unit}`;
+    svg.appendChild(lbl);
+  }
+
+  // X-axis line + ticks
+  const axisG = el("g", { "class": "ts-axis" });
+  const xAxisY = M.t + innerH;
+  axisG.appendChild(el("line", {
+    x1: M.l, x2: W - M.r, y1: xAxisY, y2: xAxisY,
+    stroke: "rgba(31,23,20,0.6)",
+  }));
+  for (const t of xTicks) {
+    axisG.appendChild(el("line", {
+      x1: sx(t.x), x2: sx(t.x), y1: xAxisY, y2: xAxisY + 4,
+      stroke: "rgba(31,23,20,0.55)",
+    }));
+    const txt = el("text", {
+      x: sx(t.x), y: xAxisY + 16, "text-anchor": "middle",
+      "font-size": "10", fill: "rgba(31,23,20,0.55)",
+    });
+    txt.textContent = t.label;
+    axisG.appendChild(txt);
+  }
+  svg.appendChild(axisG);
+
+  return svg;
+}
+
+// =====================================================================
+// Single-station time-series card (lookup view, month or year mode)
+// =====================================================================
+function buildTimeseriesCard(c, mode) {
   const card = document.createElement("div");
   card.className = "dash-card timeseries";
   const variable = state.lookupVariable;
   const cfg = VAR_CONFIG[variable];
   const dec = cfg.decimals;
-
-  // determine month from lookupDoy
-  const { m: month } = monthDayFromDoy(state.lookupDoy);
-  const dStart = CUMULATIVE[month - 1];
-  const days = DAYS_IN_MONTH[month - 1];
-  const samples = [];
-  for (let i = 0; i < days; i++) {
-    const doy = dStart + i;
-    const mu = c.climate[variable].mean[doy];
-    const sd = c.climate[variable].std[doy];
-    samples.push({ d: i + 1, doy, mu, sd });
-  }
-
-  // SVG plot
-  const W = 880, H = 320, M = { l: 56, r: 24, t: 20, b: 36 };
-  const innerW = W - M.l - M.r;
-  const innerH = H - M.t - M.b;
-
-  const xs = samples.map((s) => s.d);
-  const xMin = 1, xMax = days;
-
   const sigN = state.lookupSigmaN;
-  const upper = samples.map((s) => s.mu == null ? null : s.mu + sigN * s.sd);
-  const lower = samples.map((s) => s.mu == null ? null : s.mu - sigN * s.sd);
-  const upper2 = samples.map((s) => s.mu == null ? null : s.mu + 2 * sigN * s.sd);
-  const lower2 = samples.map((s) => s.mu == null ? null : s.mu - 2 * sigN * s.sd);
-  const allVals = samples.flatMap((s) =>
-    s.mu == null ? [] : [s.mu - 2 * sigN * s.sd, s.mu + 2 * sigN * s.sd]);
-  const yLo = Math.min(...allVals);
-  const yHi = Math.max(...allVals);
-  const yPad = (yHi - yLo) * 0.06 || 1;
-  const yMin = yLo - yPad, yMax = yHi + yPad;
 
-  const sx = (d) => M.l + ((d - xMin) / Math.max(1, xMax - xMin)) * innerW;
-  const sy = (v) => M.t + (1 - (v - yMin) / Math.max(0.0001, yMax - yMin)) * innerH;
+  const range = rangeForMode(mode, state.lookupDoy);
+  const samples = climSamples(c, variable, range.start, range.count);
+  const series = [{
+    name: c.name, samples, ...SERIES_PALETTE.A,
+  }];
 
-  // build SVG
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("class", "timeseries-svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-
-  // grid (horizontal)
-  const gridG = document.createElementNS(ns, "g");
-  gridG.setAttribute("class", "ts-grid");
-  for (let i = 0; i <= 4; i++) {
-    const yv = yMin + (yMax - yMin) * (i / 4);
-    const y = sy(yv);
-    const ln = document.createElementNS(ns, "line");
-    ln.setAttribute("x1", M.l); ln.setAttribute("x2", W - M.r);
-    ln.setAttribute("y1", y); ln.setAttribute("y2", y);
-    gridG.appendChild(ln);
-    const tx = document.createElementNS(ns, "text");
-    tx.setAttribute("x", M.l - 6);
-    tx.setAttribute("y", y + 3);
-    tx.setAttribute("text-anchor", "end");
-    tx.setAttribute("font-size", "10");
-    tx.setAttribute("fill", "rgba(31,23,20,0.55)");
-    tx.textContent = yv.toFixed(dec);
-    gridG.appendChild(tx);
-  }
-  svg.appendChild(gridG);
-
-  // outer 2σ band
-  const outerArea = `M ${sx(samples[0].d)} ${sy(upper2[0])} ` +
-    samples.slice(1).map((s, i) => `L ${sx(s.d)} ${sy(upper2[i + 1])}`).join(" ") +
-    " " + samples.slice().reverse().map((s, i) =>
-      `L ${sx(s.d)} ${sy(lower2[lower2.length - 1 - i])}`).join(" ") + " Z";
-  const outer = document.createElementNS(ns, "path");
-  outer.setAttribute("class", "ts-band-2");
-  outer.setAttribute("d", outerArea);
-  svg.appendChild(outer);
-
-  // inner sigma band
-  const area = `M ${sx(samples[0].d)} ${sy(upper[0])} ` +
-    samples.slice(1).map((s, i) => `L ${sx(s.d)} ${sy(upper[i + 1])}`).join(" ") +
-    " " + samples.slice().reverse().map((s, i) =>
-      `L ${sx(s.d)} ${sy(lower[lower.length - 1 - i])}`).join(" ") + " Z";
-  const band = document.createElementNS(ns, "path");
-  band.setAttribute("class", "ts-band");
-  band.setAttribute("d", area);
-  svg.appendChild(band);
-
-  // mean line
-  const meanD = samples.map((s, i) => `${i === 0 ? "M" : "L"} ${sx(s.d)} ${sy(s.mu)}`).join(" ");
-  const mean = document.createElementNS(ns, "path");
-  mean.setAttribute("class", "ts-mean");
-  mean.setAttribute("d", meanD);
-  svg.appendChild(mean);
-
-  // dots
-  for (const s of samples) {
-    if (s.mu == null) continue;
-    const c1 = document.createElementNS(ns, "circle");
-    c1.setAttribute("class", "ts-mean-dot");
-    c1.setAttribute("cx", sx(s.d));
-    c1.setAttribute("cy", sy(s.mu));
-    c1.setAttribute("r", 2);
-    svg.appendChild(c1);
-  }
-
-  // target indicator (if selected day in this month)
-  const targetMD = monthDayFromDoy(state.lookupDoy);
-  if (targetMD.m === month) {
-    const t = samples.find((s) => s.d === targetMD.d);
-    if (t && t.mu != null) {
-      const tx = sx(t.d), ty = sy(t.mu);
-      const tg = document.createElementNS(ns, "g");
-      tg.innerHTML = `
-        <line x1="${tx}" y1="${M.t}" x2="${tx}" y2="${M.t + innerH}" stroke="rgba(196,41,31,0.55)" stroke-dasharray="2 3"></line>
-        <circle class="ts-target" cx="${tx}" cy="${ty}" r="4.5"></circle>
-        <text class="ts-target-text" x="${tx + 8}" y="${ty - 8}">${t.mu.toFixed(dec)} ${cfg.unit}</text>`;
-      svg.appendChild(tg);
+  // target marker
+  let target = null;
+  if (mode === "year") {
+    const s = samples[state.lookupDoy];
+    target = s ? { x: s.x, mu: s.mu, color: SERIES_PALETTE.A.color } : null;
+  } else {
+    const md = monthDayFromDoy(state.lookupDoy);
+    if (md.m - 1 === range.monthIdx) {
+      const s = samples[md.d - 1];
+      target = s ? { x: s.x, mu: s.mu, color: SERIES_PALETTE.A.color } : null;
     }
   }
 
-  // x-axis ticks
-  const axisG = document.createElementNS(ns, "g");
-  axisG.setAttribute("class", "ts-axis");
-  const xAxisY = M.t + innerH;
-  const xAxis = document.createElementNS(ns, "line");
-  xAxis.setAttribute("x1", M.l); xAxis.setAttribute("x2", W - M.r);
-  xAxis.setAttribute("y1", xAxisY); xAxis.setAttribute("y2", xAxisY);
-  xAxis.setAttribute("stroke", "rgba(31,23,20,0.6)");
-  axisG.appendChild(xAxis);
-  for (let d = 1; d <= days; d++) {
-    if (days > 14 && d !== 1 && d !== days && d % 2 !== 0) continue;
-    const tk = document.createElementNS(ns, "line");
-    tk.setAttribute("x1", sx(d)); tk.setAttribute("x2", sx(d));
-    tk.setAttribute("y1", xAxisY); tk.setAttribute("y2", xAxisY + 4);
-    tk.setAttribute("stroke", "rgba(31,23,20,0.55)");
-    axisG.appendChild(tk);
-    const txt = document.createElementNS(ns, "text");
-    txt.setAttribute("x", sx(d));
-    txt.setAttribute("y", xAxisY + 16);
-    txt.setAttribute("text-anchor", "middle");
-    txt.setAttribute("font-size", "10");
-    txt.setAttribute("fill", "rgba(31,23,20,0.55)");
-    txt.textContent = d;
-    axisG.appendChild(txt);
-  }
-  svg.appendChild(axisG);
+  const svg = renderTimeseriesSvg({
+    series, sigN, dec, unit: cfg.unit,
+    xRange: { min: 1, max: range.count },
+    xTicks: range.ticks,
+    target,
+  });
 
+  const titleSuffix = mode === "year"
+    ? "Annual normals"
+    : `${range.title} normals`;
   card.innerHTML = `
     <header class="dc-head">
       <div>
-        <span class="dc-kicker">TIME SERIES</span>
-        <span class="dc-title">${MONTH_LONG[month - 1]} — Daily Normals (μ ± ${state.lookupSigmaN}σ band)</span>
+        <span class="dc-kicker">${mode === "year" ? "ANNUAL CYCLE" : "MONTHLY CYCLE"}</span>
+        <span class="dc-title">${titleSuffix} (μ ± ${sigN}σ band)</span>
       </div>
       <div class="dc-meta">${cfg.label} · ${cfg.unit}</div>
     </header>`;
   card.appendChild(svg);
 
-  // legend / caption
   const cap = document.createElement("div");
   cap.className = "stats-band";
-  cap.innerHTML = `
-    Solid line traces the climatological daily mean for ${MONTH_LONG[month - 1]} at <b style="color:var(--ink);font-style:normal">${c.name}, ${c.state}</b>.
-    Inner shaded band is μ ± ${state.lookupSigmaN}σ; outer band is μ ± ${2 * state.lookupSigmaN}σ. Vertical guide marks the selected day.`;
+  if (mode === "year") {
+    cap.innerHTML = `Daily climatological mean across the calendar year for <b style="color:var(--ink);font-style:normal">${c.name}, ${c.state}</b>. Inner band is μ ± ${sigN}σ; outer band is μ ± ${2 * sigN}σ. The dashed guide marks the selected day.`;
+  } else {
+    cap.innerHTML = `Daily climatological mean for ${range.title} at <b style="color:var(--ink);font-style:normal">${c.name}, ${c.state}</b>. Inner band is μ ± ${sigN}σ; outer band is μ ± ${2 * sigN}σ. The dashed guide marks the selected day.`;
+  }
   card.appendChild(cap);
 
+  return card;
+}
+
+// =====================================================================
+// Two-station overlay time-series card (compare view)
+// =====================================================================
+function buildCompareTimeseriesCard(cA, cB, mode) {
+  const card = document.createElement("div");
+  card.className = "dash-card timeseries";
+  const variable = state.compareVariable;
+  const cfg = VAR_CONFIG[variable];
+  const dec = cfg.decimals;
+  const sigN = state.compareSigmaN;
+
+  const range = rangeForMode(mode, state.compareDoy);
+  const samplesA = climSamples(cA, variable, range.start, range.count);
+  const samplesB = climSamples(cB, variable, range.start, range.count);
+  const series = [
+    { name: cA.name, samples: samplesA, ...SERIES_PALETTE.A },
+    { name: cB.name, samples: samplesB, ...SERIES_PALETTE.B },
+  ];
+
+  // target on station A's curve at the selected day (if visible in range)
+  let target = null;
+  if (mode === "year") {
+    const s = samplesA[state.compareDoy];
+    target = s ? { x: s.x, mu: s.mu, color: SERIES_PALETTE.A.color } : null;
+  } else {
+    const md = monthDayFromDoy(state.compareDoy);
+    if (md.m - 1 === range.monthIdx) {
+      const s = samplesA[md.d - 1];
+      target = s ? { x: s.x, mu: s.mu, color: SERIES_PALETTE.A.color } : null;
+    }
+  }
+
+  const svg = renderTimeseriesSvg({
+    series, sigN, dec, unit: cfg.unit,
+    xRange: { min: 1, max: range.count },
+    xTicks: range.ticks,
+    target,
+  });
+
+  const kicker = mode === "year" ? "ANNUAL OVERLAY" : "MONTHLY OVERLAY";
+  card.innerHTML = `
+    <header class="dc-head">
+      <div>
+        <span class="dc-kicker">${kicker}</span>
+        <span class="dc-title">${mode === "year" ? "Annual normals" : range.title + " normals"} (μ ± ${sigN}σ band)</span>
+      </div>
+      <div class="dc-meta">${cfg.label} · ${cfg.unit}</div>
+    </header>
+    <div class="ts-legend">
+      <span class="ts-swatch" style="background:${SERIES_PALETTE.A.color}"></span>
+      <span class="ts-legend-label"><b>${cA.name}, ${cA.state}</b> &nbsp;<i>(Station A)</i></span>
+      <span class="ts-swatch" style="background:${SERIES_PALETTE.B.color};margin-left:18px"></span>
+      <span class="ts-legend-label"><b>${cB.name}, ${cB.state}</b> &nbsp;<i>(Station B)</i></span>
+    </div>`;
+  card.appendChild(svg);
+
+  const cap = document.createElement("div");
+  cap.className = "stats-band";
+  cap.innerHTML = `Two-station overlay. Solid line is each station's daily climatological mean; the surrounding band is μ ± ${sigN}σ (and faintly, μ ± ${2 * sigN}σ). The dashed guide marks the selected day on Station A's curve.`;
+  card.appendChild(cap);
+
+  return card;
+}
+
+// ============================================================
+//   COMPARE VIEW — search, controls, dashboard
+// ============================================================
+const compareDashboard = document.getElementById("compareDashboard");
+const compareDateInput = document.getElementById("compareDate");
+const compareVarSelect = document.getElementById("compareVar");
+const compareSigmaInput = document.getElementById("compareSigmaN");
+
+// Variable selector
+for (const [k, cfg] of Object.entries(VAR_CONFIG)) {
+  const opt = document.createElement("option");
+  opt.value = k;
+  opt.textContent = `${cfg.label} (${cfg.unit})`;
+  compareVarSelect.appendChild(opt);
+}
+compareVarSelect.value = state.compareVariable;
+
+function setCompareDateInput(doy) {
+  const { m, d } = monthDayFromDoy(doy);
+  const year = 2025;
+  compareDateInput.value = `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+setCompareDateInput(state.compareDoy);
+
+compareDateInput.addEventListener("change", () => {
+  const v = compareDateInput.value;
+  if (!v) return;
+  const parts = v.split("-").map(Number);
+  if (parts.length < 3) return;
+  state.compareDoy = doyFromMonthDay(parts[1], parts[2]);
+  renderCompareDashboard();
+});
+
+compareVarSelect.addEventListener("change", () => {
+  state.compareVariable = compareVarSelect.value;
+  renderCompareDashboard();
+});
+
+compareSigmaInput.addEventListener("input", () => {
+  const v = parseFloat(compareSigmaInput.value);
+  if (!Number.isFinite(v)) return;
+  state.compareSigmaN = v;
+  renderCompareDashboard();
+});
+
+const compareModeToggle = document.querySelector('.mode-toggle[data-target="compare"]');
+compareModeToggle.querySelectorAll(".mode").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    compareModeToggle.querySelectorAll(".mode")
+      .forEach((b) => b.classList.toggle("is-active", b === btn));
+    state.compareMode = btn.dataset.mode;
+    renderCompareDashboard();
+  });
+});
+
+// Two parallel station searches (Station A / Station B)
+for (const slot of ["A", "B"]) {
+  const input = document.querySelector(`.compare-input[data-slot="${slot}"]`);
+  const results = document.querySelector(`.lookup-results[data-slot="${slot}"]`);
+  const suffix = document.querySelector(`.lookup-suffix[data-slot="${slot}"]`);
+  bindSearch({
+    input, results, suffix,
+    onPick: (c) => {
+      if (slot === "A") state.compareAId = c.id;
+      else state.compareBId = c.id;
+      renderCompareDashboard();
+    },
+  });
+}
+
+function getCompareCity(slot) {
+  const id = slot === "A" ? state.compareAId : state.compareBId;
+  return CITIES.find((c) => c.id === id);
+}
+
+function renderCompareDashboard() {
+  const A = getCompareCity("A");
+  const B = getCompareCity("B");
+  if (!A || !B) {
+    compareDashboard.innerHTML = `
+      <div class="dash-empty">
+        <span class="dash-empty-glyph">⇌</span>
+        <p>Pick two stations to compare.</p>
+        <p class="dash-empty-hint">Useful for sanity-checking intuitions — for example, <em>Phoenix, AZ</em> versus <em>Death Valley, CA</em>, or <em>Seattle, WA</em> versus <em>San Diego, CA</em>. Snapshot, difference, and overlaid time-series will appear below.</p>
+      </div>`;
+    return;
+  }
+  compareDashboard.innerHTML = "";
+  compareDashboard.appendChild(buildCompareSnapshotCard(A, "A"));
+  compareDashboard.appendChild(buildCompareSnapshotCard(B, "B"));
+  compareDashboard.appendChild(buildDifferenceCard(A, B));
+  if (state.compareMode === "month" || state.compareMode === "year") {
+    compareDashboard.appendChild(buildCompareTimeseriesCard(A, B, state.compareMode));
+  }
+}
+
+function buildCompareSnapshotCard(c, slot) {
+  const variable = state.compareVariable;
+  const cfg = VAR_CONFIG[variable];
+  const dec = cfg.decimals;
+  const sigN = state.compareSigmaN;
+  const mu = c.climate[variable].mean[state.compareDoy];
+  const sd = c.climate[variable].std[state.compareDoy];
+  const lo = mu == null ? null : mu - sigN * sd;
+  const hi = mu == null ? null : mu + sigN * sd;
+
+  const card = document.createElement("div");
+  card.className = `dash-card compare-snapshot compare-snapshot--${slot.toLowerCase()}`;
+  card.innerHTML = `
+    <header class="dc-head">
+      <div>
+        <span class="dc-kicker">STATION ${slot}</span>
+        <span class="dc-title">${c.name}, ${c.state}</span>
+      </div>
+      <div class="dc-meta">${formatMonthDay(state.compareDoy)}</div>
+    </header>
+    <div class="snapshot-cell featured">
+      <span class="sc-label">${cfg.label} · μ</span>
+      <span class="sc-val">${mu == null ? "—" : mu.toFixed(dec)}<span class="sc-unit">${cfg.unit}</span></span>
+      <span class="sc-band">σ = <b>${sd == null ? "—" : sd.toFixed(dec === 0 ? 1 : 2)}</b> ${cfg.unit}
+       &nbsp;·&nbsp; μ ± ${sigN}σ&nbsp;= <code>${lo == null ? "—" : lo.toFixed(dec)} … ${hi == null ? "—" : hi.toFixed(dec)}</code></span>
+    </div>`;
+  return card;
+}
+
+function buildDifferenceCard(A, B) {
+  const card = document.createElement("div");
+  card.className = "dash-card compare-diff";
+  const variable = state.compareVariable;
+  const cfg = VAR_CONFIG[variable];
+  const dec = cfg.decimals;
+  const muA = A.climate[variable].mean[state.compareDoy];
+  const muB = B.climate[variable].mean[state.compareDoy];
+  const sdA = A.climate[variable].std[state.compareDoy];
+  const sdB = B.climate[variable].std[state.compareDoy];
+  const diff = (muA != null && muB != null) ? muA - muB : null;
+
+  // Standard error of the difference of two independent climatological means.
+  // Each sample has n=43 years; SE = sqrt((σA² + σB²) / n).
+  const N = META.sampleYears || 43;
+  const se = (sdA != null && sdB != null && N > 0)
+    ? Math.sqrt((sdA * sdA + sdB * sdB) / N) : null;
+  const z = (diff != null && se != null && se > 0) ? diff / se : null;
+
+  // Annual aggregates
+  let mxA = -Infinity, mxB = -Infinity, mnA = Infinity, mnB = Infinity;
+  let amA = 0, amB = 0, anN = 0;
+  for (let d = 0; d < 365; d++) {
+    const a = A.climate[variable].mean[d];
+    const b = B.climate[variable].mean[d];
+    if (a == null || b == null) continue;
+    amA += a; amB += b; anN++;
+    if (a > mxA) mxA = a;
+    if (b > mxB) mxB = b;
+    if (a < mnA) mnA = a;
+    if (b < mnB) mnB = b;
+  }
+  if (anN > 0) { amA /= anN; amB /= anN; }
+
+  const fmtSign = (x) => (x == null ? "—" : (x >= 0 ? "+" : "") + x.toFixed(dec));
+
+  card.innerHTML = `
+    <header class="dc-head">
+      <div>
+        <span class="dc-kicker">DIFFERENCE</span>
+        <span class="dc-title">A &minus; B</span>
+      </div>
+      <div class="dc-meta">${cfg.label} · ${cfg.unit}</div>
+    </header>
+    <div class="snapshot-cell featured" style="border-color:var(--signal)">
+      <span class="sc-label">μ_A − μ_B · ${formatMonthDay(state.compareDoy)}</span>
+      <span class="sc-val">${fmtSign(diff)}<span class="sc-unit">${cfg.unit}</span></span>
+      <span class="sc-band">${z == null ? "&nbsp;" : `effect size ≈ <b>${z.toFixed(2)}σ</b> (pooled, n=${N})`}</span>
+    </div>
+    <div class="stats-readout">
+      <div class="stats-readout-row">
+        <span class="sr-label">Annual mean Δ</span>
+        <span class="sr-val">${fmtSign(amA - amB)}</span>
+      </div>
+      <div class="stats-readout-row">
+        <span class="sr-label">Peak Δ (A − B)</span>
+        <span class="sr-val">${fmtSign(mxA - mxB)}</span>
+      </div>
+      <div class="stats-readout-row">
+        <span class="sr-label">Trough Δ (A − B)</span>
+        <span class="sr-val">${fmtSign(mnA - mnB)}</span>
+      </div>
+    </div>`;
   return card;
 }
