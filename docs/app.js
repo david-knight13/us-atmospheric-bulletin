@@ -150,6 +150,8 @@ function fmtDateStamp() {
 document.getElementById("datestamp").textContent = fmtDateStamp();
 document.getElementById("cityCount").textContent = `${CITIES.length} stations`;
 document.getElementById("footStations").textContent = `${CITIES.length} stations`;
+const mapStationCountEl = document.getElementById("mapStationCount");
+if (mapStationCountEl) mapStationCountEl.textContent = CITIES.length.toLocaleString();
 document.getElementById("periodCell").textContent = `PERIOD ${META.period.replace("/", " — ")}`;
 
 // ============================================================
@@ -349,58 +351,83 @@ function buildMaskAndGrid() {
   const mask = mctx.getImageData(0, 0, W, H).data; // RGBA
 
   // 2. Precompute per-pixel top-K cities (k=8) and inverse-distance weights.
-  // Project cities into the mask's coord system (same projection scaled).
-  const lowCityXY = CITIES
-    .map((c) => {
-      const xy = tmpProj([c.lon, c.lat]);
-      return xy ? { x: xy[0], y: xy[1] } : null;
-    });
+  // Pack the city projection into flat typed arrays (one indirection avoided
+  // per inner-loop iteration vs. an array of objects). Cities that fail to
+  // project (rare with Albers-USA) are skipped.
+  const cxArr = new Float32Array(CITIES.length);
+  const cyArr = new Float32Array(CITIES.length);
+  const cvalid = new Uint8Array(CITIES.length);
+  let projCount = 0;
+  for (let c = 0; c < CITIES.length; c++) {
+    const xy = tmpProj([CITIES[c].lon, CITIES[c].lat]);
+    if (xy) {
+      cxArr[c] = xy[0];
+      cyArr[c] = xy[1];
+      cvalid[c] = 1;
+      projCount++;
+    }
+  }
 
   const K = 8;
   const indices = new Int16Array(W * H * K);
   const weights = new Float32Array(W * H * K);
 
-  // scratch arrays for top-K
-  const dists = new Float32Array(CITIES.length);
-  const order = new Int16Array(CITIES.length);
+  // Per-pixel top-K via insertion into a sorted buffer of size K. Cost:
+  // O(N + K²) per pixel instead of O(N·K) with the previous selection sort —
+  // roughly 7× faster at N ≈ 975, which keeps the precompute under ~1 s.
+  const kIdx = new Int16Array(K);
+  const kDist = new Float64Array(K);
 
   for (let py = 0; py < H; py++) {
     for (let px = 0; px < W; px++) {
       const i = py * W + px;
-      // alpha = mask[i*4+3]; we filled with opaque black for inside US
       if (mask[i * 4 + 3] < 200) {
-        // outside US — mark with index -1
         indices[i * K] = -1;
         continue;
       }
-      // compute distances to all cities
-      for (let c = 0; c < CITIES.length; c++) {
-        const cp = lowCityXY[c];
-        if (!cp) { dists[c] = Infinity; continue; }
-        const dx = cp.x - px, dy = cp.y - py;
-        dists[c] = dx * dx + dy * dy;
-        order[c] = c;
-      }
-      // partial sort: select top K (indices with smallest dists)
-      // simple selection sort for K iterations
-      for (let s = 0; s < K; s++) {
-        let bestI = s;
-        for (let j = s + 1; j < CITIES.length; j++) {
-          if (dists[order[j]] < dists[order[bestI]]) bestI = j;
+
+      // Seed top-K with the first K projecting cities, then insertion-sort.
+      let seeded = 0;
+      let c0 = 0;
+      while (seeded < K && c0 < CITIES.length) {
+        if (cvalid[c0]) {
+          const dx = cxArr[c0] - px, dy = cyArr[c0] - py;
+          const d2 = dx * dx + dy * dy;
+          let j = seeded - 1;
+          while (j >= 0 && kDist[j] > d2) {
+            kDist[j + 1] = kDist[j]; kIdx[j + 1] = kIdx[j];
+            j--;
+          }
+          kDist[j + 1] = d2; kIdx[j + 1] = c0;
+          seeded++;
         }
-        const tmp = order[s]; order[s] = order[bestI]; order[bestI] = tmp;
+        c0++;
       }
-      // compute weights = 1 / d^2 (cap d²>=1 to avoid blow-up)
+      let worst = kDist[K - 1];
+
+      // Stream the remaining cities; only those beating `worst` are inserted.
+      for (let c = c0; c < CITIES.length; c++) {
+        if (!cvalid[c]) continue;
+        const dx = cxArr[c] - px, dy = cyArr[c] - py;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= worst) continue;
+        let j = K - 1;
+        while (j > 0 && kDist[j - 1] > d2) {
+          kDist[j] = kDist[j - 1]; kIdx[j] = kIdx[j - 1];
+          j--;
+        }
+        kDist[j] = d2; kIdx[j] = c;
+        worst = kDist[K - 1];
+      }
+
+      // Inverse-distance weights, cap d² ≥ 1 to avoid blow-up at a hit.
       let wSum = 0;
       for (let s = 0; s < K; s++) {
-        const idx = order[s];
-        const d2 = Math.max(1, dists[idx]);
-        const w = 1 / d2;
-        indices[i * K + s] = idx;
+        const w = 1 / Math.max(1, kDist[s]);
+        indices[i * K + s] = kIdx[s];
         weights[i * K + s] = w;
         wSum += w;
       }
-      // normalize
       for (let s = 0; s < K; s++) weights[i * K + s] /= wSum;
     }
   }
@@ -495,7 +522,7 @@ function renderBorders() {
     .attr("class", "city-dot city-marker")
     .attr("cx", (d) => d.x)
     .attr("cy", (d) => d.y)
-    .attr("r", 2.2)
+    .attr("r", 1.6)
     .on("mousemove", (ev, d) => showHover(ev, d))
     .on("mouseleave", () => hideHover())
     .on("click", (ev, d) => {

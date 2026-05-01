@@ -1,6 +1,9 @@
 node_modules/
 .DS_Store
 scripts/fetch.log
+scripts/cities5000.txt
+scripts/geonames-cities5000.zip
+public/
 *.log
 .env
 .env.*

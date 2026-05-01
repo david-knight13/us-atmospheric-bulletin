@@ -577,11 +577,18 @@ input[type=range]#daySlider::-moz-range-thumb {
 }
 #mapSvg .city-dot {
   fill: var(--ink);
+  fill-opacity: 0.55;
   stroke: var(--paper-bright);
-  stroke-width: 0.8;
+  stroke-width: 0.5;
   cursor: crosshair;
+  transition: r 0.08s ease, fill 0.08s ease, fill-opacity 0.08s ease;
 }
-#mapSvg .city-dot:hover { fill: var(--signal); }
+#mapSvg .city-dot:hover {
+  fill: var(--signal);
+  fill-opacity: 1;
+  r: 3.4;
+  stroke-width: 0.9;
+}
 #mapSvg .city-marker { pointer-events: all; }
 
 .hover-card {
