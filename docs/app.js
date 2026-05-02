@@ -43,9 +43,11 @@ function formatMonthDay(doy) {
 }
 
 // ---------- variable scales ----------
-// Custom interpolators tuned for paper-stock palette, not the usual viridis.
+// Custom interpolators tuned for the paper-stock palette, not the usual
+// viridis. The design intent is for the heatmap to read as a printed bulletin
+// — saturated reds/blues, cream midtones, no neon.
 const COLOR_RAMPS = {
-  // Diverging cool→cream→hot for temperatures (high)
+  // Diverging cool→cream→hot for temperature variables.
   tmax: d3.interpolateRgbBasis([
     "#1d3557", "#3d6a8a", "#7ea7be", "#cfdbe2",
     "#f3eada", "#f0c47a", "#e6814b", "#c4291f", "#7a1a13",
@@ -58,24 +60,71 @@ const COLOR_RAMPS = {
     "#1d3557", "#3d6a8a", "#7ea7be", "#cfdbe2",
     "#f3eada", "#f0c47a", "#e6814b", "#c4291f", "#7a1a13",
   ]),
-  // Sequential cream → deep blue for precipitation
+  dewpoint: d3.interpolateRgbBasis([
+    "#1d3557", "#3d6a8a", "#7ea7be", "#cfdbe2",
+    "#f3eada", "#f0c47a", "#e6814b", "#c4291f", "#7a1a13",
+  ]),
+  // Sequential cream → deep blue for precipitation / humidity.
   precip: d3.interpolateRgbBasis([
     "#f3eada", "#dfd4b1", "#a9c1c9", "#5d8aa3", "#27466e", "#0e2748",
   ]),
-  // Sequential cream → plum for wind
+  humidity: d3.interpolateRgbBasis([
+    "#f3eada", "#dfd8b9", "#a6c3c7", "#5a89a3", "#27466e", "#0e2748",
+  ]),
+  // Sequential cream → plum for wind.
   wind: d3.interpolateRgbBasis([
     "#f3eada", "#dcc7a8", "#c1986b", "#894d57", "#3a1f3d",
   ]),
+  // Sequential cream → ember for UV index (low → high).
+  uv: d3.interpolateRgbBasis([
+    "#f3eada", "#f0d18e", "#e89a4a", "#c4291f", "#7a1a13", "#3a0a07",
+  ]),
+  // Sequential cream → solar gold → ember for surface irradiance.
+  solar: d3.interpolateRgbBasis([
+    "#f3eada", "#dfd4b1", "#e6c478", "#c97a45", "#7a1a13",
+  ]),
+  // Diverging blue (low) ↔ red (high) for surface pressure.
+  pressure: d3.interpolateRgbBasis([
+    "#27466e", "#5d8aa3", "#a9c1c9",
+    "#f3eada",
+    "#dcc7a8", "#a86846", "#7a1a13",
+  ]),
+  // Sequential cream → overcast slate for cloud cover.
+  cloud: d3.interpolateRgbBasis([
+    "#f3eada", "#dccbb1", "#a9b1b8", "#5a6770", "#2a333b",
+  ]),
 };
 
-// Per-variable display config (domain set after data load).
-const VAR_CONFIG = {
-  tmax:   { label: META.variables.tmax.label,   short: "T-MAX",  unit: "°F", decimals: 0, ramp: COLOR_RAMPS.tmax },
-  tmin:   { label: META.variables.tmin.label,   short: "T-MIN",  unit: "°F", decimals: 0, ramp: COLOR_RAMPS.tmin },
-  tmean:  { label: META.variables.tmean.label,  short: "T-MEAN", unit: "°F", decimals: 0, ramp: COLOR_RAMPS.tmean },
-  precip: { label: META.variables.precip.label, short: "PRECIP", unit: "in", decimals: 2, ramp: COLOR_RAMPS.precip },
-  wind:   { label: META.variables.wind.label,   short: "WIND",   unit: "mph", decimals: 0, ramp: COLOR_RAMPS.wind },
+// Static per-variable display knobs — short label for chips, decimals for
+// formatting. Anything unknown gets a neutral fallback below.
+const VAR_DISPLAY = {
+  tmax:     { short: "T-MAX",  decimals: 0 },
+  tmin:     { short: "T-MIN",  decimals: 0 },
+  tmean:    { short: "T-MEAN", decimals: 0 },
+  precip:   { short: "PRECIP", decimals: 2 },
+  wind:     { short: "WIND",   decimals: 0 },
+  humidity: { short: "RH",     decimals: 0 },
+  dewpoint: { short: "DEW",    decimals: 0 },
+  uv:       { short: "UV",     decimals: 1 },
+  solar:    { short: "SOLAR",  decimals: 1 },
+  pressure: { short: "PRESS",  decimals: 0 },
+  cloud:    { short: "CLOUD",  decimals: 0 },
 };
+
+// Build VAR_CONFIG from whatever variables the loaded climatology actually
+// exposes — that way new fields (humidity, UV, …) light up automatically once
+// the fetch script regenerates the file, and old payloads don't crash.
+const VAR_CONFIG = {};
+for (const [k, vmeta] of Object.entries(META.variables)) {
+  const disp = VAR_DISPLAY[k] || {};
+  VAR_CONFIG[k] = {
+    label: vmeta.label,
+    short: disp.short ?? k.toUpperCase(),
+    unit: vmeta.unit,
+    decimals: disp.decimals ?? 1,
+    ramp: COLOR_RAMPS[k] || COLOR_RAMPS.tmean,
+  };
+}
 
 // Compute a stable global domain per variable across ALL cities and all days.
 // This keeps the legend invariant as the user moves the slider.
@@ -951,6 +1000,10 @@ function el(name, attrs = {}, children = []) {
 
 // series: [{ name, samples, color, bandColor, bandColor2 }]
 // target: { x, mu, color } | null  — vertical marker at the selected day
+//
+// Returns an HTMLElement (a positioned wrapper containing the SVG plus a
+// floating hover tooltip). The wrapper handles its own crosshair / focus-dot
+// behavior; callers just append it.
 function renderTimeseriesSvg({ series, sigN, dec, unit, xRange, xTicks, target, height = 320 }) {
   const W = 880, H = height, M = { l: 60, r: 24, t: 24, b: 36 };
   const innerW = W - M.l - M.r;
@@ -1061,7 +1114,148 @@ function renderTimeseriesSvg({ series, sigN, dec, unit, xRange, xTicks, target, 
   }
   svg.appendChild(axisG);
 
-  return svg;
+  // ----- Interactive hover overlay -------------------------------------
+  // A guide line + a focus dot per series + a floating HTML tooltip. The
+  // overlay <rect> sits on top of every plot element so it gets first crack
+  // at mouse events; pointer-events: all keeps the hit test alive even
+  // though the rect is fully transparent.
+  const guide = el("line", {
+    "class": "ts-guide",
+    x1: M.l, x2: M.l, y1: M.t, y2: M.t + innerH,
+    visibility: "hidden",
+  });
+  const focusDots = series.map((s) => el("circle", {
+    "class": "ts-focus-dot",
+    r: 4.2, cx: 0, cy: 0,
+    fill: s.color,
+    visibility: "hidden",
+  }));
+  svg.appendChild(guide);
+  for (const d of focusDots) svg.appendChild(d);
+
+  const overlay = el("rect", {
+    "class": "ts-overlay",
+    x: M.l, y: M.t, width: innerW, height: innerH,
+  });
+  svg.appendChild(overlay);
+
+  // Wrap so the absolutely-positioned tooltip has a stacking context.
+  const wrap = document.createElement("div");
+  wrap.className = "ts-wrap";
+  wrap.appendChild(svg);
+
+  const tip = document.createElement("div");
+  tip.className = "ts-tip";
+  tip.hidden = true;
+  wrap.appendChild(tip);
+
+  // Map a screen-space mouse position onto the SVG's viewBox coords.
+  // We deliberately render with preserveAspectRatio="xMidYMid meet", so the
+  // SVG can be letterboxed inside the wrapper. Account for the letterbox
+  // offsets so a click on the visible plot actually lands on the plot in
+  // viewBox coordinates.
+  function pointerToViewBox(ev) {
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const meet = Math.min(rect.width / W, rect.height / H);
+    if (meet <= 0) return null;
+    const renderedW = W * meet;
+    const renderedH = H * meet;
+    const offX = (rect.width - renderedW) / 2;
+    const offY = (rect.height - renderedH) / 2;
+    return {
+      x: (ev.clientX - rect.left - offX) / meet,
+      y: (ev.clientY - rect.top - offY) / meet,
+      rect,
+    };
+  }
+
+  function nearestSampleIndex(samples, dataX) {
+    if (!samples.length) return 0;
+    // samples are at x = i+1 for i = 0..N-1, so dataX-1 ≈ index.
+    const idx = Math.round(dataX - 1);
+    return Math.max(0, Math.min(samples.length - 1, idx));
+  }
+
+  // Build the tooltip body (date header + one row per series). Returns the
+  // x-coordinate of the snapped sample in viewBox units, or null if there is
+  // nothing valid to show at this x.
+  function updateAt(ev) {
+    const p = pointerToViewBox(ev);
+    if (!p) return null;
+    if (p.x < M.l - 0.5 || p.x > M.l + innerW + 0.5) return null;
+
+    const dataX = xRange.min + ((p.x - M.l) / innerW) * (xRange.max - xRange.min);
+    const idx = nearestSampleIndex(series[0].samples, dataX);
+    const ref = series[0].samples[idx];
+    if (!ref) return null;
+    const gx = sx(ref.x);
+    guide.setAttribute("x1", gx);
+    guide.setAttribute("x2", gx);
+    guide.setAttribute("visibility", "visible");
+
+    // Build tooltip rows
+    const dateLabel = ref.doy != null
+      ? formatMonthDay(ref.doy)
+      : (xTicks.find((t) => t.x === ref.x)?.label || `x=${ref.x}`);
+
+    let tipHtml = `<div class="ts-tip-date">${dateLabel}</div>`;
+    for (let i = 0; i < series.length; i++) {
+      const s = series[i].samples[idx];
+      const dot = focusDots[i];
+      if (!s || s.mu == null) {
+        dot.setAttribute("visibility", "hidden");
+        continue;
+      }
+      dot.setAttribute("cx", sx(s.x));
+      dot.setAttribute("cy", sy(s.mu));
+      dot.setAttribute("visibility", "visible");
+
+      const muStr = s.mu.toFixed(dec);
+      const sdStr = s.sd == null ? null : s.sd.toFixed(dec === 0 ? 1 : 2);
+      const lo = (s.sd != null && sigN > 0) ? (s.mu - sigN * s.sd).toFixed(dec) : null;
+      const hi = (s.sd != null && sigN > 0) ? (s.mu + sigN * s.sd).toFixed(dec) : null;
+
+      tipHtml += `
+        <div class="ts-tip-row">
+          <span class="ts-tip-sw" style="background:${series[i].color}"></span>
+          <span class="ts-tip-name">${series[i].name || ""}</span>
+          <span class="ts-tip-val">${muStr} <span style="opacity:.62">${unit}</span></span>
+        </div>
+        ${sdStr ? `<div class="ts-tip-band">σ ${sdStr}${lo != null ? ` · μ±${sigN}σ ${lo}…${hi}` : ""}</div>` : ""}
+      `;
+    }
+    tip.innerHTML = tipHtml;
+    tip.hidden = false;
+
+    // Position tooltip relative to the wrapper. Clamp to the visible width
+    // so it doesn't escape the right edge.
+    const wrapRect = wrap.getBoundingClientRect();
+    const cx = ev.clientX - wrapRect.left;
+    const cy = ev.clientY - wrapRect.top;
+    const tipW = tip.offsetWidth || 180;
+    const tipH = tip.offsetHeight || 70;
+    let left = cx + 14;
+    if (left + tipW > wrapRect.width - 4) left = cx - tipW - 14;
+    if (left < 4) left = 4;
+    let top = cy - tipH - 12;
+    if (top < 4) top = cy + 16;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+
+    return gx;
+  }
+
+  function hideHover() {
+    guide.setAttribute("visibility", "hidden");
+    for (const d of focusDots) d.setAttribute("visibility", "hidden");
+    tip.hidden = true;
+  }
+
+  overlay.addEventListener("mousemove", (ev) => { updateAt(ev); });
+  overlay.addEventListener("mouseleave", hideHover);
+
+  return wrap;
 }
 
 // =====================================================================

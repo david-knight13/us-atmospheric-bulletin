@@ -3,7 +3,13 @@
 // Selection rule:
 //   - country == US
 //   - admin1 ∈ { 50 states + DC }   (PR, GU, VI, MP, AS excluded — Albers-USA cannot project them)
-//   - population >= 50_000
+//   - all populated places with population >= POP_HIGH (50 000) are kept as
+//     "anchors", then any place with population in [POP_LOW, POP_HIGH) is
+//     added as a *gap-filler* iff it sits at least MIN_KM away from every
+//     already-included station. This gives uniform spatial coverage —
+//     metros don't get over-densified, and rural states (the Dakotas, MT,
+//     WY, ME, VT, WV) finally pick up some interior stations so the
+//     interpolated heatmap stops looking blocky there.
 //
 // GeoNames cities5000.txt is tab-separated with these columns (1-indexed):
 //   1  geonameid
@@ -35,7 +41,20 @@ const VALID_STATES = new Set([
   "VT","VA","WA","WV","WI","WY",
 ]);
 
-const POP_MIN = 50_000;
+const POP_HIGH = 50_000;
+const POP_LOW  = 10_000;
+const MIN_KM   = 35;          // gap-filler keep-distance from any anchor / earlier filler
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
 
 function slug(s) {
   return s
@@ -48,7 +67,7 @@ function slug(s) {
 }
 
 const txt = await readFile(resolve(__dirname, "cities5000.txt"), "utf8");
-const out = [];
+const all = [];
 const seen = new Set();      // dedupe by (state, slug, rounded lat/lon)
 const idCount = new Map();   // disambiguate same-state same-name
 
@@ -60,7 +79,7 @@ for (const line of txt.split("\n")) {
   const state = c[10];
   if (!VALID_STATES.has(state)) continue;
   const pop = parseInt(c[14], 10);
-  if (!Number.isFinite(pop) || pop < POP_MIN) continue;
+  if (!Number.isFinite(pop) || pop < POP_LOW) continue;
   const lat = parseFloat(c[4]);
   const lon = parseFloat(c[5]);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
@@ -80,7 +99,7 @@ for (const line of txt.split("\n")) {
   idCount.set(baseId, n);
   const id = n === 1 ? baseId : `${baseId}-${n}`;
 
-  out.push({
+  all.push({
     id,
     name,
     state,
@@ -90,9 +109,37 @@ for (const line of txt.split("\n")) {
   });
 }
 
-// Sort by population descending so the most-relevant stations are searched
-// first; this makes the dropdown autocomplete feel snappier even though the
-// renderer doesn't depend on order.
+// Sort by population descending so anchors are processed first and gap-fillers
+// pick the largest town in any empty cell.
+all.sort((a, b) => b.population - a.population);
+
+const out = [];
+let anchors = 0, fillers = 0, fillerSkipped = 0;
+
+for (const c of all) {
+  if (c.population >= POP_HIGH) {
+    out.push(c);
+    anchors++;
+    continue;
+  }
+  // Gap-filler: keep only if far enough from every already-included point.
+  let minD = Infinity;
+  for (const ex of out) {
+    const d = haversineKm(c.lat, c.lon, ex.lat, ex.lon);
+    if (d < minD) {
+      minD = d;
+      if (minD < MIN_KM) break;
+    }
+  }
+  if (minD >= MIN_KM) {
+    out.push(c);
+    fillers++;
+  } else {
+    fillerSkipped++;
+  }
+}
+
+// Final sort by population descending so the search dropdown is snappy.
 out.sort((a, b) => b.population - a.population);
 
 // Drop the population field from the on-disk record — front-end doesn't use it
@@ -105,6 +152,9 @@ await writeFile(outPath, JSON.stringify(slim, null, 0));
 const byState = {};
 for (const c of slim) byState[c.state] = (byState[c.state] || 0) + 1;
 console.log(`Wrote ${slim.length} cities → ${outPath}`);
+console.log(`  ${anchors} anchors (≥${POP_HIGH.toLocaleString()})`);
+console.log(`  ${fillers} gap-fillers (${POP_LOW.toLocaleString()}–${POP_HIGH.toLocaleString()}, ≥${MIN_KM} km from any neighbor)`);
+console.log(`  ${fillerSkipped} candidates skipped (too close)`);
 console.log(`States covered: ${Object.keys(byState).length}`);
 console.log(`Per-state range: ${Math.min(...Object.values(byState))} – ${Math.max(...Object.values(byState))}`);
 const top10 = Object.entries(byState).sort((a, b) => b[1] - a[1]).slice(0, 10);

@@ -31,10 +31,21 @@ const POWER_PARAMS = {
   T2M: "tmean",
   PRECTOTCORR: "precip",
   WS10M_MAX: "wind",
+  RH2M: "humidity",                  // %
+  T2MDEW: "dewpoint",                // °C → °F
+  ALLSKY_SFC_UV_INDEX: "uv",         // standard UV index (already scaled)
+  ALLSKY_SFC_SW_DWN: "solar",        // MJ/m²/day → kWh/m²/day (÷3.6)
+  PS: "pressure",                    // kPa → hPa (×10)
+  CLOUD_AMT: "cloud",                // %
 };
 const PARAM_LIST = Object.keys(POWER_PARAMS).join(",");
 
-// Conversion: SI → imperial
+// Bumped whenever the variable set or unit conventions change. The cache
+// reader discards any on-disk file with a different schemaVersion so partial
+// fetches from the old schema don't silently get reused.
+const SCHEMA_VERSION = 2;
+
+// Conversion: SI → imperial / familiar units
 const FILL = -999;
 function convert(short, val) {
   if (val == null || val === FILL) return null;
@@ -42,11 +53,17 @@ function convert(short, val) {
     case "tmax":
     case "tmin":
     case "tmean":
+    case "dewpoint":
       return val * 9 / 5 + 32;          // °C → °F
     case "precip":
       return val / 25.4;                // mm → inches
     case "wind":
       return val * 2.2369362920544;     // m/s → mph
+    case "solar":
+      return val / 3.6;                 // MJ/m²/day → kWh/m²/day
+    case "pressure":
+      return val * 10;                  // kPa → hPa
+    // humidity, uv, cloud are pass-through (already %, index, %).
     default:
       return val;
   }
@@ -187,6 +204,10 @@ async function readExisting() {
       console.log(`existing data is for period ${j.meta?.period}, want ${PERIOD} — discarding`);
       return new Map();
     }
+    if ((j.meta?.schemaVersion || 1) !== SCHEMA_VERSION) {
+      console.log(`existing schemaVersion=${j.meta?.schemaVersion || 1}, want ${SCHEMA_VERSION} — discarding`);
+      return new Map();
+    }
     const map = new Map();
     for (const c of j.cities || []) if (c.climate) map.set(c.id, c);
     return map;
@@ -203,12 +224,19 @@ async function flush(cities, existing) {
       attribution: "https://power.larc.nasa.gov/ — NASA Langley / GMAO MERRA-2",
       period: PERIOD,
       sampleYears: 43,
+      schemaVersion: SCHEMA_VERSION,
       variables: {
-        tmax:   { label: "Daily High Temperature",  unit: "°F" },
-        tmin:   { label: "Daily Low Temperature",   unit: "°F" },
-        tmean:  { label: "Daily Mean Temperature",  unit: "°F" },
-        precip: { label: "Daily Precipitation",     unit: "in" },
-        wind:   { label: "Daily Max Wind Speed",    unit: "mph" },
+        tmax:     { label: "Daily High Temperature",  unit: "°F" },
+        tmin:     { label: "Daily Low Temperature",   unit: "°F" },
+        tmean:    { label: "Daily Mean Temperature",  unit: "°F" },
+        precip:   { label: "Daily Precipitation",     unit: "in" },
+        wind:     { label: "Daily Max Wind Speed",    unit: "mph" },
+        humidity: { label: "Relative Humidity",       unit: "%" },
+        dewpoint: { label: "Dew Point Temperature",   unit: "°F" },
+        uv:       { label: "UV Index (clear-sky max)", unit: "idx" },
+        solar:    { label: "Surface Solar Irradiance", unit: "kWh/m²/d" },
+        pressure: { label: "Surface Pressure",        unit: "hPa" },
+        cloud:    { label: "Cloud Cover",             unit: "%" },
       },
       generatedAt: new Date().toISOString(),
     },
